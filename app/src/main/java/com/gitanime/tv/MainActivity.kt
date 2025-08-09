@@ -5,6 +5,7 @@ import android.app.PictureInPictureParams
 import android.graphics.Color
 import android.net.http.SslError
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Rational
 import android.view.KeyEvent
 import android.view.View
@@ -26,9 +27,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.toArgb
@@ -53,6 +58,8 @@ class MainActivity : ComponentActivity() {
     private var containerWidthPx: Int = 0
     private var containerHeightPx: Int = 0
 
+    private var lastOkTime: Long = 0L
+
     private val helperJs = (
         "(function(){\n" +
             "if(window._tvHelper) return;\n" +
@@ -61,7 +68,8 @@ class MainActivity : ComponentActivity() {
             " click:function(x,y){var el=document.elementFromPoint(x,y);if(!el) return false;var o={clientX:x,clientY:y,bubbles:true,cancelable:true};['pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(t){try{el.dispatchEvent(new MouseEvent(t,o));}catch(e){}});return true;},\n" +
             " dbl:function(x,y){var el=document.elementFromPoint(x,y);if(!el) return false;var o={clientX:x,clientY:y,bubbles:true,cancelable:true,detail:2};try{el.dispatchEvent(new MouseEvent('dblclick',o));}catch(e){} return true;},\n" +
             " toggleFS:function(){var v=document.querySelector('video');if(!v) return false; if(document.fullscreenElement){document.exitFullscreen&&document.exitFullscreen();return true;} var el=v.closest('[data-player], .player, .video, body')||v; if(el.requestFullscreen){el.requestFullscreen();return true;} if(v.webkitEnterFullscreen){v.webkitEnterFullscreen();return true;} return false;},\n" +
-            " playPause:function(){var v=document.querySelector('video');if(!v) return false; if(v.paused) v.play(); else v.pause(); return true;}\n" +
+            " playPause:function(){var v=document.querySelector('video');if(!v) return false; if(v.paused) v.play(); else v.pause(); return true;},\n" +
+            " snapControls:function(cx,cy){var v=document.querySelector('video');if(!v) return null;var r=v.getBoundingClientRect();var cands=[];var btns=[].slice.call(document.querySelectorAll('button,[role=button],svg,[class*=full],[aria-label*=Full],[title*=Full]'));for(var i=0;i<btns.length;i++){var b=btns[i];var n=((b.getAttribute('aria-label')||b.title||b.className||'')+'').toLowerCase();if(n.indexOf('full')>-1){var br=b.getBoundingClientRect(); cands.push({x:br.left+br.width/2,y:br.top+br.height/2});}} if(cands.length===0){cands.push({x:r.right-24,y:r.bottom-16});} cands.push({x:r.left+r.width/2,y:r.top+r.height/2}); var best=cands[0],bd=1e12; for(var j=0;j<cands.length;j++){var dx=cands[j].x-cx; var dy=cands[j].y-cy; var d=dx*dx+dy*dy; if(d<bd){bd=d; best=cands[j];}} return best;}\n" +
             "};\n" +
         "})();"
         )
@@ -89,13 +97,13 @@ class MainActivity : ComponentActivity() {
                     scope.launch {
                         cursorX.animateTo(
                             targetX.value.coerceIn(0f, (containerWidthPx - 1).toFloat()),
-                            animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)
+                            animationSpec = tween(durationMillis = 110, easing = FastOutSlowInEasing)
                         )
                     }
                     scope.launch {
                         cursorY.animateTo(
                             targetY.value.coerceIn(0f, (containerHeightPx - 1).toFloat()),
-                            animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)
+                            animationSpec = tween(durationMillis = 110, easing = FastOutSlowInEasing)
                         )
                     }
                 }
@@ -224,6 +232,12 @@ class MainActivity : ComponentActivity() {
                                 .border(2.dp, ComposeColor(0xFF00BCD4), CircleShape)
                         )
 
+                        // Overlay fullscreen button
+                        Button(
+                            onClick = { sendToggleFullscreen() },
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
+                        ) { Text("Fullscreen") }
+
                         BackHandler(enabled = true) {
                             when {
                                 isFullScreen -> {
@@ -260,6 +274,7 @@ class MainActivity : ComponentActivity() {
                         webViewRef?.evaluateJavascript("window.scrollBy(0, 150);", null)
                     }
                     sendMoveToPage()
+                    requestSnapToControls()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_UP -> {
@@ -268,6 +283,7 @@ class MainActivity : ComponentActivity() {
                         webViewRef?.evaluateJavascript("window.scrollBy(0, -150);", null)
                     }
                     sendMoveToPage()
+                    requestSnapToControls()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_LEFT -> {
@@ -276,6 +292,7 @@ class MainActivity : ComponentActivity() {
                         webViewRef?.evaluateJavascript("window.scrollBy(-120, 0);", null)
                     }
                     sendMoveToPage()
+                    requestSnapToControls()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
@@ -284,15 +301,25 @@ class MainActivity : ComponentActivity() {
                         webViewRef?.evaluateJavascript("window.scrollBy(120, 0);", null)
                     }
                     sendMoveToPage()
+                    requestSnapToControls()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
-                    sendClickToPage()
+                    val now = SystemClock.uptimeMillis()
+                    val dbl = now - lastOkTime <= 350
+                    lastOkTime = now
+                    if (dbl) {
+                        sendDblClickToPage()
+                        // Also try toggle fullscreen explicitly
+                        sendToggleFullscreen()
+                    } else {
+                        sendClickToPage()
+                    }
                     return true
                 }
                 // Dedicated fullscreen toggle key (fallback)
                 KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                    webViewRef?.evaluateJavascript("(function(){" + helperJs + "; window._tvHelper&&window._tvHelper.toggleFS();})();", null)
+                    sendToggleFullscreen()
                     return true
                 }
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
@@ -348,6 +375,62 @@ class MainActivity : ComponentActivity() {
             })();
         """.trimIndent()
         webViewRef?.evaluateJavascript(js, null)
+    }
+
+    private fun sendDblClickToPage() {
+        val x = targetX.value
+        val y = targetY.value
+        val js = """
+            (function(){
+              $helperJs
+              var dpr = window.devicePixelRatio||1;
+              var x = ${x};
+              var y = ${y};
+              window._tvHelper && window._tvHelper.dbl(x/dpr, y/dpr);
+            })();
+        """.trimIndent()
+        webViewRef?.evaluateJavascript(js, null)
+    }
+
+    private fun sendToggleFullscreen() {
+        val js = """
+            (function(){
+               $helperJs
+               window._tvHelper && window._tvHelper.toggleFS();
+            })();
+        """.trimIndent()
+        webViewRef?.evaluateJavascript(js, null)
+    }
+
+    private fun requestSnapToControls() {
+        val x = targetX.value
+        val y = targetY.value
+        val js = """
+            (function(){
+              $helperJs
+              var dpr = window.devicePixelRatio||1;
+              var cx = ${x}/dpr;
+              var cy = ${y}/dpr;
+              var p = window._tvHelper && window._tvHelper.snapControls(cx, cy);
+              if(!p) return 'NaN,NaN';
+              return Math.round(p.x*dpr)+','+Math.round(p.y*dpr);
+            })();
+        """.trimIndent()
+        webViewRef?.evaluateJavascript(js) { res ->
+            if (res != null && res.length >= 5) {
+                val v = res.trim('"')
+                val parts = v.split(',')
+                if (parts.size == 2) {
+                    val px = parts[0].toFloatOrNull()
+                    val py = parts[1].toFloatOrNull()
+                    if (px != null && py != null && !px.isNaN() && !py.isNaN()) {
+                        targetX.value = px
+                        targetY.value = py
+                        sendMoveToPage()
+                    }
+                }
+            }
+        }
     }
 
     private fun enterPipIfPossible() {
