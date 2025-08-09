@@ -20,10 +20,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
@@ -32,6 +40,12 @@ private const val BASE_URL = "https://gitanime-web.vercel.app/"
 class MainActivity : ComponentActivity() {
 
     private var webViewRef: WebView? = null
+
+    // Pointer state (pixel-based)
+    private val cursorXState = mutableStateOf(0f)
+    private val cursorYState = mutableStateOf(0f)
+    private var containerWidthPx: Int = 0
+    private var containerHeightPx: Int = 0
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,8 +67,17 @@ class MainActivity : ComponentActivity() {
                     var customView: View? by remember { mutableStateOf(null) }
                     var customViewCallback: WebChromeClient.CustomViewCallback? by remember { mutableStateOf(null) }
 
-                    androidx.compose.foundation.layout.Box(
-                        modifier = Modifier.background(bgColor)
+                    Box(
+                        modifier = Modifier
+                            .background(bgColor)
+                            .onGloballyPositioned {
+                                containerWidthPx = it.size.width
+                                containerHeightPx = it.size.height
+                                if (cursorXState.value == 0f && cursorYState.value == 0f) {
+                                    cursorXState.value = (containerWidthPx / 2f)
+                                    cursorYState.value = (containerHeightPx / 2f)
+                                }
+                            }
                     ) {
                         AndroidView(
                             modifier = Modifier,
@@ -83,8 +106,6 @@ class MainActivity : ComponentActivity() {
                                 val initFocusJs = (
                                     "(function(){" +
                                         "document.body.style.outline='none';" +
-                                        "var css=':focus{outline: 2px solid #00BCD4 !important; outline-offset:2px}';" +
-                                        "var s=document.createElement('style'); s.innerHTML=css; document.head.appendChild(s);" +
                                         "})();"
                                     )
 
@@ -146,6 +167,20 @@ class MainActivity : ComponentActivity() {
                             }
                         )
 
+                        // Virtual cursor overlay (24dp circle)
+                        val pointerRadiusPx = 12
+                        Box(
+                            modifier = Modifier
+                                .offset {
+                                    IntOffset(
+                                        (cursorXState.value.toInt() - pointerRadiusPx).coerceAtLeast(0),
+                                        (cursorYState.value.toInt() - pointerRadiusPx).coerceAtLeast(0)
+                                    )
+                                }
+                                .size(24.dp)
+                                .border(2.dp, androidx.compose.ui.graphics.Color(0xFF00BCD4), CircleShape)
+                        )
+
                         BackHandler(enabled = true) {
                             when {
                                 isFullScreen -> {
@@ -168,28 +203,43 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
+            val step = 50f
+            val edge = 40f
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    webViewRef?.evaluateJavascript("(function(){var el=document.activeElement||document.body; if(el && el.nextElementSibling){el.nextElementSibling.focus(); el.nextElementSibling.scrollIntoView({block:'center'}); return true;} window.scrollBy(0, 150); return false;})();", null)
+                    cursorYState.value = (cursorYState.value + step).coerceAtMost((containerHeightPx - 1).toFloat())
+                    if (cursorYState.value > containerHeightPx - edge) {
+                        webViewRef?.evaluateJavascript("window.scrollBy(0, 150);", null)
+                    }
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_UP -> {
-                    webViewRef?.evaluateJavascript("(function(){var el=document.activeElement||document.body; if(el && el.previousElementSibling){el.previousElementSibling.focus(); el.previousElementSibling.scrollIntoView({block:'center'}); return true;} window.scrollBy(0, -150); return false;})();", null)
+                    cursorYState.value = (cursorYState.value - step).coerceAtLeast(0f)
+                    if (cursorYState.value < edge) {
+                        webViewRef?.evaluateJavascript("window.scrollBy(0, -150);", null)
+                    }
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_LEFT -> {
-                    webViewRef?.evaluateJavascript("window.scrollBy(-150, 0);", null)
+                    cursorXState.value = (cursorXState.value - step).coerceAtLeast(0f)
+                    if (cursorXState.value < edge) {
+                        webViewRef?.evaluateJavascript("window.scrollBy(-120, 0);", null)
+                    }
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    webViewRef?.evaluateJavascript("window.scrollBy(150, 0);", null)
+                    cursorXState.value = (cursorXState.value + step).coerceAtMost((containerWidthPx - 1).toFloat())
+                    if (cursorXState.value > containerWidthPx - edge) {
+                        webViewRef?.evaluateJavascript("window.scrollBy(120, 0);", null)
+                    }
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
+                    val x = cursorXState.value.toInt()
+                    val y = cursorYState.value.toInt()
                     val js = """
                         (function(){
-                          var x = Math.floor(window.innerWidth/2), y = Math.floor(window.innerHeight/2);
-                          var el = (document.activeElement && document.activeElement !== document.body) ? document.activeElement : document.elementFromPoint(x,y);
+                          var el = document.elementFromPoint($x, $y);
                           if(!el) return false;
                           try {
                             var evt = new MouseEvent('click', {bubbles:true, cancelable:true, view: window});
@@ -201,6 +251,8 @@ class MainActivity : ComponentActivity() {
                           return true;
                         })();
                     """.trimIndent()
+                        .replace("$x", x.toString())
+                        .replace("$y", y.toString())
                     webViewRef?.evaluateJavascript(js, null)
                     return true
                 }
