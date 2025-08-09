@@ -2,7 +2,6 @@ package com.gitanime.tv
 
 import android.annotation.SuppressLint
 import android.app.PictureInPictureParams
-import android.content.res.Configuration
 import android.graphics.Color
 import android.net.http.SslError
 import android.os.Bundle
@@ -26,7 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.splashscreen.SplashScreen
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
 private const val BASE_URL = "https://gitanime-web.vercel.app/"
 
@@ -34,16 +33,17 @@ class MainActivity : ComponentActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
-        SplashScreen.installSplashScreen(this)
+        installSplashScreen()
         super.onCreate(savedInstanceState)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         setContent {
             androidx.compose.material3.MaterialTheme {
+                val bgColor = androidx.compose.material3.MaterialTheme.colorScheme.background
                 androidx.compose.material3.Surface(
-                    modifier = Modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.background),
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.background
+                    modifier = Modifier.background(bgColor),
+                    color = bgColor
                 ) {
                     val context = LocalContext.current
 
@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
                     var customViewCallback: WebChromeClient.CustomViewCallback? by remember { mutableStateOf(null) }
 
                     androidx.compose.foundation.layout.Box(
-                        modifier = Modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.background)
+                        modifier = Modifier.background(bgColor)
                     ) {
                         AndroidView(
                             modifier = Modifier,
@@ -207,7 +207,7 @@ class MainActivity : ComponentActivity() {
                                 wv
                             },
                             update = { wv ->
-                                wv.setBackgroundColor(androidx.compose.material3.MaterialTheme.colorScheme.background.toArgb())
+                                wv.setBackgroundColor(bgColor.toArgb())
                             }
                         )
 
@@ -241,8 +241,8 @@ class MainActivity : ComponentActivity() {
         enterPipIfPossible()
     }
 
-    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration?) {
-        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode)
         // Bisa ditambahkan penyesuaian UI saat PiP jika diperlukan
     }
 }
