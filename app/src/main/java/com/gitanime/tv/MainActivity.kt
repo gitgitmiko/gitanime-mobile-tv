@@ -5,6 +5,7 @@ import android.app.PictureInPictureParams
 import android.graphics.Color
 import android.net.http.SslError
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Rational
 import android.view.KeyEvent
 import android.view.View
@@ -53,6 +54,8 @@ class MainActivity : ComponentActivity() {
     private val targetY = mutableStateOf(0f)
     private var containerWidthPx: Int = 0
     private var containerHeightPx: Int = 0
+
+    private var okDownTimeMs: Long = 0L
 
     private val helperJs = (
         "(function(){\n" +
@@ -251,71 +254,71 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN) {
-            val base = 60f
-            val step = base + (event.repeatCount * 18f)
-            val edge = 40f
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    targetY.value = (targetY.value + step).coerceAtMost((containerHeightPx - 1).toFloat())
-                    if (targetY.value > containerHeightPx - edge) {
-                        webViewRef?.evaluateJavascript("window.scrollBy(0, 150);", null)
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                val base = 60f
+                val step = base + (event.repeatCount * 18f)
+                val edge = 40f
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        targetY.value = (targetY.value + step).coerceAtMost((containerHeightPx - 1).toFloat())
+                        if (targetY.value > containerHeightPx - edge) {
+                            webViewRef?.evaluateJavascript("window.scrollBy(0, 150);", null)
+                        }
+                        sendMoveToPage()
+                        return true
                     }
-                    sendMoveToPage()
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    targetY.value = (targetY.value - step).coerceAtLeast(0f)
-                    if (targetY.value < edge) {
-                        webViewRef?.evaluateJavascript("window.scrollBy(0, -150);", null)
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        targetY.value = (targetY.value - step).coerceAtLeast(0f)
+                        if (targetY.value < edge) {
+                            webViewRef?.evaluateJavascript("window.scrollBy(0, -150);", null)
+                        }
+                        sendMoveToPage()
+                        return true
                     }
-                    sendMoveToPage()
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_LEFT -> {
-                    targetX.value = (targetX.value - step).coerceAtLeast(0f)
-                    if (targetX.value < edge) {
-                        webViewRef?.evaluateJavascript("window.scrollBy(-120, 0);", null)
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        targetX.value = (targetX.value - step).coerceAtLeast(0f)
+                        if (targetX.value < edge) {
+                            webViewRef?.evaluateJavascript("window.scrollBy(-120, 0);", null)
+                        }
+                        sendMoveToPage()
+                        return true
                     }
-                    sendMoveToPage()
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    targetX.value = (targetX.value + step).coerceAtMost((containerWidthPx - 1).toFloat())
-                    if (targetX.value > containerWidthPx - edge) {
-                        webViewRef?.evaluateJavascript("window.scrollBy(120, 0);", null)
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        targetX.value = (targetX.value + step).coerceAtMost((containerWidthPx - 1).toFloat())
+                        if (targetX.value > containerWidthPx - edge) {
+                            webViewRef?.evaluateJavascript("window.scrollBy(120, 0);", null)
+                        }
+                        sendMoveToPage()
+                        return true
                     }
-                    sendMoveToPage()
-                    return true
+                    // Start long-press detection for OK/Enter
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
+                        okDownTimeMs = SystemClock.uptimeMillis()
+                        return true
+                    }
+                    // Fullscreen via MENU/INFO keys
+                    KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO -> {
+                        sendToggleFullscreen()
+                        return true
+                    }
                 }
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
-                    sendClickToPage()
-                    return true
-                }
-                // Fullscreen (CSS-based) fallback
-                KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                    sendToggleFullscreen()
-                    return true
-                }
-                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                    webViewRef?.evaluateJavascript("(function(){" + helperJs + "; window._tvHelper&&window._tvHelper.playPause();})();", null)
-                    return true
-                }
-                KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                    webViewRef?.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v) v.play();})();", null)
-                    return true
-                }
-                KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_STOP -> {
-                    webViewRef?.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v) v.pause();})();", null)
-                    return true
-                }
-                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                    webViewRef?.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v){try{v.currentTime = Math.min(v.duration||1e9, v.currentTime + 10);}catch(e){}}})();", null)
-                    return true
-                }
-                KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                    webViewRef?.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v){try{v.currentTime = Math.max(0, v.currentTime - 10);}catch(e){}}})();", null)
-                    return true
+            }
+            KeyEvent.ACTION_UP -> {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
+                        val up = SystemClock.uptimeMillis()
+                        val dt = up - okDownTimeMs
+                        okDownTimeMs = 0L
+                        if (dt >= 500L) {
+                            // Long-press: toggle fullscreen
+                            sendToggleFullscreen()
+                        } else {
+                            // Short tap: click
+                            sendClickToPage()
+                        }
+                        return true
+                    }
                 }
             }
         }
