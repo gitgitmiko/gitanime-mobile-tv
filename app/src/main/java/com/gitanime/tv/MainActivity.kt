@@ -53,6 +53,19 @@ class MainActivity : ComponentActivity() {
     private var containerWidthPx: Int = 0
     private var containerHeightPx: Int = 0
 
+    private val helperJs = (
+        "(function(){\n" +
+            "if(window._tvHelper) return;\n" +
+            "window._tvHelper={\n" +
+            " move:function(x,y){var e=new MouseEvent('mousemove',{clientX:x,clientY:y,bubbles:true});document.dispatchEvent(e);var el=document.elementFromPoint(x,y);if(el){el.dispatchEvent(new MouseEvent('mousemove',{clientX:x,clientY:y,bubbles:true}));}},\n" +
+            " click:function(x,y){var el=document.elementFromPoint(x,y);if(!el) return false;var o={clientX:x,clientY:y,bubbles:true,cancelable:true};['pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(t){try{el.dispatchEvent(new MouseEvent(t,o));}catch(e){}});return true;},\n" +
+            " dbl:function(x,y){var el=document.elementFromPoint(x,y);if(!el) return false;var o={clientX:x,clientY:y,bubbles:true,cancelable:true,detail:2};try{el.dispatchEvent(new MouseEvent('dblclick',o));}catch(e){} return true;},\n" +
+            " toggleFS:function(){var v=document.querySelector('video');if(!v) return false; if(document.fullscreenElement){document.exitFullscreen&&document.exitFullscreen();return true;} var el=v.closest('[data-player], .player, .video, body')||v; if(el.requestFullscreen){el.requestFullscreen();return true;} if(v.webkitEnterFullscreen){v.webkitEnterFullscreen();return true;} return false;},\n" +
+            " playPause:function(){var v=document.querySelector('video');if(!v) return false; if(v.paused) v.play(); else v.pause(); return true;}\n" +
+            "};\n" +
+        "})();"
+        )
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -76,13 +89,13 @@ class MainActivity : ComponentActivity() {
                     scope.launch {
                         cursorX.animateTo(
                             targetX.value.coerceIn(0f, (containerWidthPx - 1).toFloat()),
-                            animationSpec = tween(durationMillis = 130, easing = FastOutSlowInEasing)
+                            animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)
                         )
                     }
                     scope.launch {
                         cursorY.animateTo(
                             targetY.value.coerceIn(0f, (containerHeightPx - 1).toFloat()),
-                            animationSpec = tween(durationMillis = 130, easing = FastOutSlowInEasing)
+                            animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing)
                         )
                     }
                 }
@@ -143,6 +156,7 @@ class MainActivity : ComponentActivity() {
                                     override fun onPageFinished(view: WebView?, url: String?) {
                                         super.onPageFinished(view, url)
                                         view?.evaluateJavascript(initJs, null)
+                                        view?.evaluateJavascript(helperJs, null)
                                     }
                                     override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean = false
                                     override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) { handler?.proceed() }
@@ -220,7 +234,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        // Remember animatePointer callable in composition scope
                         LaunchedEffect(targetX.value, targetY.value) {
                             animatePointer()
                         }
@@ -237,7 +250,8 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
-            val step = 60f
+            val base = 60f
+            val step = base + (event.repeatCount * 18f)
             val edge = 40f
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -245,6 +259,7 @@ class MainActivity : ComponentActivity() {
                     if (targetY.value > containerHeightPx - edge) {
                         webViewRef?.evaluateJavascript("window.scrollBy(0, 150);", null)
                     }
+                    sendMoveToPage()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_UP -> {
@@ -252,6 +267,7 @@ class MainActivity : ComponentActivity() {
                     if (targetY.value < edge) {
                         webViewRef?.evaluateJavascript("window.scrollBy(0, -150);", null)
                     }
+                    sendMoveToPage()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_LEFT -> {
@@ -259,6 +275,7 @@ class MainActivity : ComponentActivity() {
                     if (targetX.value < edge) {
                         webViewRef?.evaluateJavascript("window.scrollBy(-120, 0);", null)
                     }
+                    sendMoveToPage()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
@@ -266,34 +283,20 @@ class MainActivity : ComponentActivity() {
                     if (targetX.value > containerWidthPx - edge) {
                         webViewRef?.evaluateJavascript("window.scrollBy(120, 0);", null)
                     }
+                    sendMoveToPage()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
-                    val x = targetX.value.toInt()
-                    val y = targetY.value.toInt()
-                    val js = """
-                        (function(){
-                          var cssX = $x / (window.devicePixelRatio||1);
-                          var cssY = $y / (window.devicePixelRatio||1);
-                          var el = document.elementFromPoint(cssX, cssY);
-                          if(!el) return false;
-                          try {
-                            var evt = new MouseEvent('click', {bubbles:true, cancelable:true, view: window});
-                            el.dispatchEvent(evt);
-                            if (el.tagName === 'VIDEO') {
-                              if (el.paused) el.play(); else el.pause();
-                            }
-                          } catch(e) {}
-                          return true;
-                        })();
-                    """.trimIndent()
-                        .replace("$x", x.toString())
-                        .replace("$y", y.toString())
-                    webViewRef?.evaluateJavascript(js, null)
+                    sendClickToPage()
+                    return true
+                }
+                // Dedicated fullscreen toggle key (fallback)
+                KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                    webViewRef?.evaluateJavascript("(function(){" + helperJs + "; window._tvHelper&&window._tvHelper.toggleFS();})();", null)
                     return true
                 }
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                    webViewRef?.evaluateJavascript("(function(){var v=document.querySelector('video'); if(!v) return false; if(v.paused) v.play(); else v.pause(); return true;})();", null)
+                    webViewRef?.evaluateJavascript("(function(){" + helperJs + "; window._tvHelper&&window._tvHelper.playPause();})();", null)
                     return true
                 }
                 KeyEvent.KEYCODE_MEDIA_PLAY -> {
@@ -315,6 +318,36 @@ class MainActivity : ComponentActivity() {
             }
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    private fun sendMoveToPage() {
+        val x = targetX.value
+        val y = targetY.value
+        val js = """
+            (function(){
+              $helperJs
+              var dpr = window.devicePixelRatio||1;
+              var x = ${x};
+              var y = ${y};
+              window._tvHelper && window._tvHelper.move(x/dpr, y/dpr);
+            })();
+        """.trimIndent()
+        webViewRef?.evaluateJavascript(js, null)
+    }
+
+    private fun sendClickToPage() {
+        val x = targetX.value
+        val y = targetY.value
+        val js = """
+            (function(){
+              $helperJs
+              var dpr = window.devicePixelRatio||1;
+              var x = ${x};
+              var y = ${y};
+              window._tvHelper && window._tvHelper.click(x/dpr, y/dpr);
+            })();
+        """.trimIndent()
+        webViewRef?.evaluateJavascript(js, null)
     }
 
     private fun enterPipIfPossible() {
