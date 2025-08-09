@@ -5,7 +5,6 @@ import android.app.PictureInPictureParams
 import android.graphics.Color
 import android.net.http.SslError
 import android.os.Bundle
-import android.os.SystemClock
 import android.util.Rational
 import android.view.KeyEvent
 import android.view.View
@@ -27,11 +26,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,16 +54,15 @@ class MainActivity : ComponentActivity() {
     private var containerWidthPx: Int = 0
     private var containerHeightPx: Int = 0
 
-    private var lastOkTime: Long = 0L
-
     private val helperJs = (
         "(function(){\n" +
             "if(window._tvHelper) return;\n" +
+            "function biggestIframe(){var ifs=[].slice.call(document.querySelectorAll('iframe'));var best=null,ba=0;for(var i=0;i<ifs.length;i++){var r=ifs[i].getBoundingClientRect();var a=r.width*r.height;if(a>ba){ba=a;best=ifs[i];}}return best;}\n" +
+            "function injectCss(){var s=document.getElementById('tvfs-style'); if(s) return s; s=document.createElement('style'); s.id='tvfs-style'; s.innerHTML='html,body{background:#000!important;overflow:hidden!important} .tvfs-target{position:fixed!important;left:0;top:0;width:100vw!important;height:100vh!important;z-index:2147483647!important;background:#000!important;object-fit:contain!important}'; document.head.appendChild(s); return s;}\n" +
             "window._tvHelper={\n" +
             " move:function(x,y){var e=new MouseEvent('mousemove',{clientX:x,clientY:y,bubbles:true});document.dispatchEvent(e);var el=document.elementFromPoint(x,y);if(el){el.dispatchEvent(new MouseEvent('mousemove',{clientX:x,clientY:y,bubbles:true}));}},\n" +
             " click:function(x,y){var el=document.elementFromPoint(x,y);if(!el) return false;var o={clientX:x,clientY:y,bubbles:true,cancelable:true};['pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(t){try{el.dispatchEvent(new MouseEvent(t,o));}catch(e){}});return true;},\n" +
-            " dbl:function(x,y){var el=document.elementFromPoint(x,y);if(!el) return false;var o={clientX:x,clientY:y,bubbles:true,cancelable:true,detail:2};try{el.dispatchEvent(new MouseEvent('dblclick',o));}catch(e){} return true;},\n" +
-            " toggleFS:function(){var v=document.querySelector('video');if(!v) return false; if(document.fullscreenElement){document.exitFullscreen&&document.exitFullscreen();return true;} var el=v.closest('[data-player], .player, .video, body')||v; if(el.requestFullscreen){el.requestFullscreen();return true;} if(v.webkitEnterFullscreen){v.webkitEnterFullscreen();return true;} return false;},\n" +
+            " toggleFS:function(){var v=document.querySelector('video');injectCss(); if(v){ if(v.classList.contains('tvfs-target')){v.classList.remove('tvfs-target'); return true;} v.classList.add('tvfs-target'); return true;} var f=biggestIframe(); if(f){ if(f.classList.contains('tvfs-target')){f.classList.remove('tvfs-target'); return true;} f.classList.add('tvfs-target'); return true;} return false;},\n" +
             " playPause:function(){var v=document.querySelector('video');if(!v) return false; if(v.paused) v.play(); else v.pause(); return true;}\n" +
             "};\n" +
         "})();"
@@ -231,12 +226,6 @@ class MainActivity : ComponentActivity() {
                                 .border(2.dp, ComposeColor(0xFF00BCD4), CircleShape)
                         )
 
-                        // Overlay fullscreen button
-                        Button(
-                            onClick = { sendToggleFullscreen() },
-                            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
-                        ) { Text("Fullscreen") }
-
                         BackHandler(enabled = true) {
                             when {
                                 isFullScreen -> {
@@ -300,19 +289,10 @@ class MainActivity : ComponentActivity() {
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
-                    val now = SystemClock.uptimeMillis()
-                    val dbl = now - lastOkTime <= 350
-                    lastOkTime = now
-                    if (dbl) {
-                        sendDblClickToPage()
-                        // Also try toggle fullscreen explicitly
-                        sendToggleFullscreen()
-                    } else {
-                        sendClickToPage()
-                    }
+                    sendClickToPage()
                     return true
                 }
-                // Dedicated fullscreen toggle key (fallback)
+                // Fullscreen (CSS-based) fallback
                 KeyEvent.KEYCODE_MEDIA_NEXT -> {
                     sendToggleFullscreen()
                     return true
@@ -367,21 +347,6 @@ class MainActivity : ComponentActivity() {
               var x = ${x};
               var y = ${y};
               window._tvHelper && window._tvHelper.click(x/dpr, y/dpr);
-            })();
-        """.trimIndent()
-        webViewRef?.evaluateJavascript(js, null)
-    }
-
-    private fun sendDblClickToPage() {
-        val x = targetX.value
-        val y = targetY.value
-        val js = """
-            (function(){
-              $helperJs
-              var dpr = window.devicePixelRatio||1;
-              var x = ${x};
-              var y = ${y};
-              window._tvHelper && window._tvHelper.dbl(x/dpr, y/dpr);
             })();
         """.trimIndent()
         webViewRef?.evaluateJavascript(js, null)
