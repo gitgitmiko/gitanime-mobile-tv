@@ -19,6 +19,9 @@ import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -27,13 +30,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import kotlinx.coroutines.launch
 
 private const val BASE_URL = "https://gitanime-web.vercel.app/"
 
@@ -41,9 +47,9 @@ class MainActivity : ComponentActivity() {
 
     private var webViewRef: WebView? = null
 
-    // Pointer state (pixel-based)
-    private val cursorXState = mutableStateOf(0f)
-    private val cursorYState = mutableStateOf(0f)
+    // Target pointer (container pixels)
+    private val targetX = mutableStateOf(0f)
+    private val targetY = mutableStateOf(0f)
     private var containerWidthPx: Int = 0
     private var containerHeightPx: Int = 0
 
@@ -57,6 +63,30 @@ class MainActivity : ComponentActivity() {
         setContent {
             androidx.compose.material3.MaterialTheme {
                 val bgColor = androidx.compose.material3.MaterialTheme.colorScheme.background
+                val density = LocalDensity.current
+                val pointerRadiusDp = 12.dp
+                val pointerRadiusPx = with(density) { pointerRadiusDp.toPx() }
+
+                // Animated pointer values
+                val scope = rememberCoroutineScope()
+                val cursorX = remember { Animatable(0f) }
+                val cursorY = remember { Animatable(0f) }
+
+                fun animatePointer() {
+                    scope.launch {
+                        cursorX.animateTo(
+                            targetX.value.coerceIn(0f, (containerWidthPx - 1).toFloat()),
+                            animationSpec = tween(durationMillis = 130, easing = FastOutSlowInEasing)
+                        )
+                    }
+                    scope.launch {
+                        cursorY.animateTo(
+                            targetY.value.coerceIn(0f, (containerHeightPx - 1).toFloat()),
+                            animationSpec = tween(durationMillis = 130, easing = FastOutSlowInEasing)
+                        )
+                    }
+                }
+
                 androidx.compose.material3.Surface(
                     modifier = Modifier.background(bgColor),
                     color = bgColor
@@ -73,9 +103,13 @@ class MainActivity : ComponentActivity() {
                             .onGloballyPositioned {
                                 containerWidthPx = it.size.width
                                 containerHeightPx = it.size.height
-                                if (cursorXState.value == 0f && cursorYState.value == 0f) {
-                                    cursorXState.value = (containerWidthPx / 2f)
-                                    cursorYState.value = (containerHeightPx / 2f)
+                                if (cursorX.value == 0f && cursorY.value == 0f) {
+                                    val cx = containerWidthPx / 2f
+                                    val cy = containerHeightPx / 2f
+                                    targetX.value = cx
+                                    targetY.value = cy
+                                    scope.launch { cursorX.snapTo(cx) }
+                                    scope.launch { cursorY.snapTo(cy) }
                                 }
                             }
                     ) {
@@ -103,16 +137,12 @@ class MainActivity : ComponentActivity() {
                                 wv.isFocusableInTouchMode = true
                                 wv.requestFocus(View.FOCUS_DOWN)
 
-                                val initFocusJs = (
-                                    "(function(){" +
-                                        "document.body.style.outline='none';" +
-                                        "})();"
-                                    )
+                                val initJs = "(function(){document.body.style.cursor='none';})();"
 
                                 wv.webViewClient = object : WebViewClient() {
                                     override fun onPageFinished(view: WebView?, url: String?) {
                                         super.onPageFinished(view, url)
-                                        view?.evaluateJavascript(initFocusJs, null)
+                                        view?.evaluateJavascript(initJs, null)
                                     }
                                     override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean = false
                                     override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) { handler?.proceed() }
@@ -168,17 +198,16 @@ class MainActivity : ComponentActivity() {
                         )
 
                         // Virtual cursor overlay (24dp circle)
-                        val pointerRadiusPx = 12
                         Box(
                             modifier = Modifier
                                 .offset {
                                     IntOffset(
-                                        (cursorXState.value.toInt() - pointerRadiusPx).coerceAtLeast(0),
-                                        (cursorYState.value.toInt() - pointerRadiusPx).coerceAtLeast(0)
+                                        (cursorX.value - pointerRadiusPx).toInt().coerceAtLeast(0),
+                                        (cursorY.value - pointerRadiusPx).toInt().coerceAtLeast(0)
                                     )
                                 }
-                                .size(24.dp)
-                                .border(2.dp, androidx.compose.ui.graphics.Color(0xFF00BCD4), CircleShape)
+                                .size(pointerRadiusDp * 2)
+                                .border(2.dp, ComposeColor(0xFF00BCD4), CircleShape)
                         )
 
                         BackHandler(enabled = true) {
@@ -189,6 +218,11 @@ class MainActivity : ComponentActivity() {
                                 webViewRef?.canGoBack() == true -> webViewRef?.goBack()
                                 else -> finish()
                             }
+                        }
+
+                        // Remember animatePointer callable in composition scope
+                        LaunchedEffect(targetX.value, targetY.value) {
+                            animatePointer()
                         }
                     }
                 }
@@ -203,43 +237,45 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
-            val step = 50f
+            val step = 60f
             val edge = 40f
             when (event.keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    cursorYState.value = (cursorYState.value + step).coerceAtMost((containerHeightPx - 1).toFloat())
-                    if (cursorYState.value > containerHeightPx - edge) {
+                    targetY.value = (targetY.value + step).coerceAtMost((containerHeightPx - 1).toFloat())
+                    if (targetY.value > containerHeightPx - edge) {
                         webViewRef?.evaluateJavascript("window.scrollBy(0, 150);", null)
                     }
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_UP -> {
-                    cursorYState.value = (cursorYState.value - step).coerceAtLeast(0f)
-                    if (cursorYState.value < edge) {
+                    targetY.value = (targetY.value - step).coerceAtLeast(0f)
+                    if (targetY.value < edge) {
                         webViewRef?.evaluateJavascript("window.scrollBy(0, -150);", null)
                     }
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_LEFT -> {
-                    cursorXState.value = (cursorXState.value - step).coerceAtLeast(0f)
-                    if (cursorXState.value < edge) {
+                    targetX.value = (targetX.value - step).coerceAtLeast(0f)
+                    if (targetX.value < edge) {
                         webViewRef?.evaluateJavascript("window.scrollBy(-120, 0);", null)
                     }
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    cursorXState.value = (cursorXState.value + step).coerceAtMost((containerWidthPx - 1).toFloat())
-                    if (cursorXState.value > containerWidthPx - edge) {
+                    targetX.value = (targetX.value + step).coerceAtMost((containerWidthPx - 1).toFloat())
+                    if (targetX.value > containerWidthPx - edge) {
                         webViewRef?.evaluateJavascript("window.scrollBy(120, 0);", null)
                     }
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
-                    val x = cursorXState.value.toInt()
-                    val y = cursorYState.value.toInt()
+                    val x = targetX.value.toInt()
+                    val y = targetY.value.toInt()
                     val js = """
                         (function(){
-                          var el = document.elementFromPoint($x, $y);
+                          var cssX = $x / (window.devicePixelRatio||1);
+                          var cssY = $y / (window.devicePixelRatio||1);
+                          var el = document.elementFromPoint(cssX, cssY);
                           if(!el) return false;
                           try {
                             var evt = new MouseEvent('click', {bubbles:true, cancelable:true, view: window});
@@ -292,12 +328,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        // Auto masuk PiP saat user menekan Home
         enterPipIfPossible()
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
-        // Bisa ditambahkan penyesuaian UI saat PiP jika diperlukan
     }
 }
