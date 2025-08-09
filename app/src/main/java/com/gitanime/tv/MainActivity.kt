@@ -31,6 +31,8 @@ private const val BASE_URL = "https://gitanime-web.vercel.app/"
 
 class MainActivity : ComponentActivity() {
 
+    private var webViewRef: WebView? = null
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -47,7 +49,6 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val context = LocalContext.current
 
-                    var webView: WebView? by remember { mutableStateOf(null) }
                     var isFullScreen by remember { mutableStateOf(false) }
                     var customView: View? by remember { mutableStateOf(null) }
                     var customViewCallback: WebChromeClient.CustomViewCallback? by remember { mutableStateOf(null) }
@@ -86,72 +87,6 @@ class MainActivity : ComponentActivity() {
                                         "var s=document.createElement('style'); s.innerHTML=css; document.head.appendChild(s);" +
                                         "})();"
                                     )
-
-                                wv.setOnKeyListener { _, keyCode, event ->
-                                    if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-                                    when (keyCode) {
-                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                                            wv.evaluateJavascript("(function(){var el=document.activeElement||document.body; if(el && el.nextElementSibling){el.nextElementSibling.focus(); el.nextElementSibling.scrollIntoView({block:'center'}); return true;} window.scrollBy(0, 150); return false;})();", null)
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_DPAD_UP -> {
-                                            wv.evaluateJavascript("(function(){var el=document.activeElement||document.body; if(el && el.previousElementSibling){el.previousElementSibling.focus(); el.previousElementSibling.scrollIntoView({block:'center'}); return true;} window.scrollBy(0, -150); return false;})();", null)
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_DPAD_LEFT -> {
-                                            wv.evaluateJavascript("window.scrollBy(-150, 0);", null)
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                            wv.evaluateJavascript("window.scrollBy(150, 0);", null)
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
-                                            val js = """
-                                                (function(){
-                                                  var x = Math.floor(window.innerWidth/2), y = Math.floor(window.innerHeight/2);
-                                                  var el = (document.activeElement && document.activeElement !== document.body) ? document.activeElement : document.elementFromPoint(x,y);
-                                                  if(!el) return false;
-                                                  try {
-                                                    var evt = new MouseEvent('click', {bubbles:true, cancelable:true, view: window});
-                                                    el.dispatchEvent(evt);
-                                                    if (el.tagName === 'VIDEO') {
-                                                      if (el.paused) el.play(); else el.pause();
-                                                    }
-                                                  } catch(e) {}
-                                                  return true;
-                                                })();
-                                            """.trimIndent()
-                                            wv.evaluateJavascript(js, null)
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                                            wv.evaluateJavascript("(function(){var v=document.querySelector('video'); if(!v) return false; if(v.paused) v.play(); else v.pause(); return true;})();", null)
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                                            wv.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v) v.play();})();", null)
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_STOP -> {
-                                            wv.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v) v.pause();})();", null)
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                                            wv.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v){try{v.currentTime = Math.min(v.duration||1e9, v.currentTime + 10);}catch(e){}}})();", null)
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                                            wv.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v){try{v.currentTime = Math.max(0, v.currentTime - 10);}catch(e){}}})();", null)
-                                            true
-                                        }
-                                        KeyEvent.KEYCODE_WINDOW -> {
-                                            enterPipIfPossible()
-                                            true
-                                        }
-                                        else -> false
-                                    }
-                                }
 
                                 wv.webViewClient = object : WebViewClient() {
                                     override fun onPageFinished(view: WebView?, url: String?) {
@@ -203,7 +138,7 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 wv.loadUrl(BASE_URL)
-                                webView = wv
+                                webViewRef = wv
                                 wv
                             },
                             update = { wv ->
@@ -214,9 +149,9 @@ class MainActivity : ComponentActivity() {
                         BackHandler(enabled = true) {
                             when {
                                 isFullScreen -> {
-                                    (webView?.webChromeClient as? WebChromeClient)?.onHideCustomView()
+                                    (webViewRef?.webChromeClient as? WebChromeClient)?.onHideCustomView()
                                 }
-                                webView?.canGoBack() == true -> webView?.goBack()
+                                webViewRef?.canGoBack() == true -> webViewRef?.goBack()
                                 else -> finish()
                             }
                         }
@@ -224,6 +159,74 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        webViewRef?.requestFocus(View.FOCUS_DOWN)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    webViewRef?.evaluateJavascript("(function(){var el=document.activeElement||document.body; if(el && el.nextElementSibling){el.nextElementSibling.focus(); el.nextElementSibling.scrollIntoView({block:'center'}); return true;} window.scrollBy(0, 150); return false;})();", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    webViewRef?.evaluateJavascript("(function(){var el=document.activeElement||document.body; if(el && el.previousElementSibling){el.previousElementSibling.focus(); el.previousElementSibling.scrollIntoView({block:'center'}); return true;} window.scrollBy(0, -150); return false;})();", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    webViewRef?.evaluateJavascript("window.scrollBy(-150, 0);", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    webViewRef?.evaluateJavascript("window.scrollBy(150, 0);", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
+                    val js = """
+                        (function(){
+                          var x = Math.floor(window.innerWidth/2), y = Math.floor(window.innerHeight/2);
+                          var el = (document.activeElement && document.activeElement !== document.body) ? document.activeElement : document.elementFromPoint(x,y);
+                          if(!el) return false;
+                          try {
+                            var evt = new MouseEvent('click', {bubbles:true, cancelable:true, view: window});
+                            el.dispatchEvent(evt);
+                            if (el.tagName === 'VIDEO') {
+                              if (el.paused) el.play(); else el.pause();
+                            }
+                          } catch(e) {}
+                          return true;
+                        })();
+                    """.trimIndent()
+                    webViewRef?.evaluateJavascript(js, null)
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                    webViewRef?.evaluateJavascript("(function(){var v=document.querySelector('video'); if(!v) return false; if(v.paused) v.play(); else v.pause(); return true;})();", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                    webViewRef?.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v) v.play();})();", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_STOP -> {
+                    webViewRef?.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v) v.pause();})();", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                    webViewRef?.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v){try{v.currentTime = Math.min(v.duration||1e9, v.currentTime + 10);}catch(e){}}})();", null)
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                    webViewRef?.evaluateJavascript("(function(){var v=document.querySelector('video'); if(v){try{v.currentTime = Math.max(0, v.currentTime - 10);}catch(e){}}})();", null)
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun enterPipIfPossible() {
