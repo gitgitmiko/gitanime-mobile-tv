@@ -68,8 +68,7 @@ class MainActivity : ComponentActivity() {
             " click:function(x,y){var el=document.elementFromPoint(x,y);if(!el) return false;var o={clientX:x,clientY:y,bubbles:true,cancelable:true};['pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(t){try{el.dispatchEvent(new MouseEvent(t,o));}catch(e){}});return true;},\n" +
             " dbl:function(x,y){var el=document.elementFromPoint(x,y);if(!el) return false;var o={clientX:x,clientY:y,bubbles:true,cancelable:true,detail:2};try{el.dispatchEvent(new MouseEvent('dblclick',o));}catch(e){} return true;},\n" +
             " toggleFS:function(){var v=document.querySelector('video');if(!v) return false; if(document.fullscreenElement){document.exitFullscreen&&document.exitFullscreen();return true;} var el=v.closest('[data-player], .player, .video, body')||v; if(el.requestFullscreen){el.requestFullscreen();return true;} if(v.webkitEnterFullscreen){v.webkitEnterFullscreen();return true;} return false;},\n" +
-            " playPause:function(){var v=document.querySelector('video');if(!v) return false; if(v.paused) v.play(); else v.pause(); return true;},\n" +
-            " snapControls:function(cx,cy){var v=document.querySelector('video');if(!v) return null;var r=v.getBoundingClientRect();var cands=[];var btns=[].slice.call(document.querySelectorAll('button,[role=button],svg,[class*=full],[aria-label*=Full],[title*=Full]'));for(var i=0;i<btns.length;i++){var b=btns[i];var n=((b.getAttribute('aria-label')||b.title||b.className||'')+'').toLowerCase();if(n.indexOf('full')>-1){var br=b.getBoundingClientRect(); cands.push({x:br.left+br.width/2,y:br.top+br.height/2});}} if(cands.length===0){cands.push({x:r.right-24,y:r.bottom-16});} cands.push({x:r.left+r.width/2,y:r.top+r.height/2}); var best=cands[0],bd=1e12; for(var j=0;j<cands.length;j++){var dx=cands[j].x-cx; var dy=cands[j].y-cy; var d=dx*dx+dy*dy; if(d<bd){bd=d; best=cands[j];}} return best;}\n" +
+            " playPause:function(){var v=document.querySelector('video');if(!v) return false; if(v.paused) v.play(); else v.pause(); return true;}\n" +
             "};\n" +
         "})();"
         )
@@ -274,7 +273,6 @@ class MainActivity : ComponentActivity() {
                         webViewRef?.evaluateJavascript("window.scrollBy(0, 150);", null)
                     }
                     sendMoveToPage()
-                    requestSnapToControls()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_UP -> {
@@ -283,7 +281,6 @@ class MainActivity : ComponentActivity() {
                         webViewRef?.evaluateJavascript("window.scrollBy(0, -150);", null)
                     }
                     sendMoveToPage()
-                    requestSnapToControls()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_LEFT -> {
@@ -292,7 +289,6 @@ class MainActivity : ComponentActivity() {
                         webViewRef?.evaluateJavascript("window.scrollBy(-120, 0);", null)
                     }
                     sendMoveToPage()
-                    requestSnapToControls()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
@@ -301,7 +297,6 @@ class MainActivity : ComponentActivity() {
                         webViewRef?.evaluateJavascript("window.scrollBy(120, 0);", null)
                     }
                     sendMoveToPage()
-                    requestSnapToControls()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_BUTTON_A -> {
@@ -400,37 +395,6 @@ class MainActivity : ComponentActivity() {
             })();
         """.trimIndent()
         webViewRef?.evaluateJavascript(js, null)
-    }
-
-    private fun requestSnapToControls() {
-        val x = targetX.value
-        val y = targetY.value
-        val js = """
-            (function(){
-              $helperJs
-              var dpr = window.devicePixelRatio||1;
-              var cx = ${x}/dpr;
-              var cy = ${y}/dpr;
-              var p = window._tvHelper && window._tvHelper.snapControls(cx, cy);
-              if(!p) return 'NaN,NaN';
-              return Math.round(p.x*dpr)+','+Math.round(p.y*dpr);
-            })();
-        """.trimIndent()
-        webViewRef?.evaluateJavascript(js) { res ->
-            if (res != null && res.length >= 5) {
-                val v = res.trim('"')
-                val parts = v.split(',')
-                if (parts.size == 2) {
-                    val px = parts[0].toFloatOrNull()
-                    val py = parts[1].toFloatOrNull()
-                    if (px != null && py != null && !px.isNaN() && !py.isNaN()) {
-                        targetX.value = px
-                        targetY.value = py
-                        sendMoveToPage()
-                    }
-                }
-            }
-        }
     }
 
     private fun enterPipIfPossible() {
